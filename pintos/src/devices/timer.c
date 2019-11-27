@@ -7,7 +7,11 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-  
+
+//added by tmdghks0612
+#include <list.h>
+#include "threads/malloc.h"
+
 /* See [8254] for hardware details of the 8254 timer chip. */
 
 #if TIMER_FREQ < 19
@@ -16,6 +20,25 @@
 #if TIMER_FREQ > 1000
 #error TIMER_FREQ <= 1000 recommended
 #endif
+
+//struct for sleep_list
+struct SleepThread{
+    int64_t tick_end;
+    struct semaphore sema;
+    struct list_elem elem;
+};
+
+//pop function for waking up and removing from sleep_list
+static void popSleepFront(int32_t current);
+
+//list of processes that are sleeping
+static struct list sleep_list;
+
+//lock used by timer sleep function
+static struct lock sleep_lock;
+
+//compare function for list_insert_ordered
+static bool less_func(const struct list_elem* a,const struct list_elem* b, void *aux);
 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
@@ -37,6 +60,9 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  
+  list_init(&sleep_list);
+  lock_init(&sleep_lock);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -89,11 +115,21 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
+  struct SleepThread *sleep_thread = (struct SleepThread*)malloc(sizeof(struct SleepThread));
+  sema_init(&sleep_thread->sema, 0);
+  sleep_thread->tick_end = timer_ticks() + ticks;
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
+  list_insert_ordered(&sleep_list, &sleep_thread->elem, less_func, 0);
+
+  sema_down(&sleep_thread->sema);
+  return;
+
+	/* original implementation 
+  int64_t start = timer_ticks ();
+	while (timer_elapsed (start) < ticks) 
     thread_yield ();
+	*/
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -170,8 +206,21 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+	struct list_elem *e;
   ticks++;
-  thread_tick ();
+
+  if(list_empty(&sleep_list)){
+	  thread_tick ();
+	  return;
+  }
+  if(list_entry(list_begin(&sleep_list), struct SleepThread, elem)->tick_end == ticks){
+	  popSleepFront(ticks);
+	  thread_tick ();
+  }
+  else{
+	  thread_tick();
+  }
+  return;
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -243,4 +292,35 @@ real_time_delay (int64_t num, int32_t denom)
      the possibility of overflow. */
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
+}
+
+static void popSleepFront(int32_t current){
+/*	struct SleepThread *t = list_entry(list_begin(&sleep_list), struct SleepThread, elem);
+	int64_t current = t->tick_end;*/
+	struct SleepThread *t;
+	struct semaphore *current_sema;
+	enum intr_level old_level;
+
+	while((t = list_entry(list_begin(&sleep_list), struct SleepThread, elem))->tick_end == current){
+		current_sema = &(t->sema);
+		
+		old_level = intr_disable();
+		list_entry(list_pop_front(&sleep_list), struct SleepThread, elem);
+		intr_set_level(old_level);
+
+		sema_up(current_sema);
+	}
+	return;
+}
+
+static bool less_func(const struct list_elem* a,const struct list_elem* b, void *aux){
+	struct SleepThread* itemp1 = list_entry(a, struct SleepThread, elem);
+	struct SleepThread* itemp2 = list_entry(b, struct SleepThread, elem);
+
+	if(itemp1->tick_end < itemp2 -> tick_end){
+		return true;
+	}
+	else{
+		return false;
+	}
 }
