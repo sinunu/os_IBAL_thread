@@ -62,6 +62,7 @@ bool thread_prior_aging;
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
+static int load_avg = 0;
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -134,6 +135,8 @@ thread_tick (void)
   struct thread *t = thread_current ();
 
   /* Update statistics. */
+  if (thread_mlfqs)
+      t->recent_cpu += (1 << 14);
   if (t == idle_thread)
     idle_ticks++;
 #ifdef USERPROG
@@ -266,8 +269,7 @@ thread_unblock (struct thread *t)
   t->status = THREAD_READY;
   intr_set_level (old_level);
   if (thread_current() != idle_thread)
-    if (thread_current()->priority < t->priority)
-       thread_yield();
+    needToYield();
 }
 
 /* Returns the name of the running thread. */
@@ -368,12 +370,8 @@ thread_set_priority (int new_priority)
 {
   if (thread_mlfqs)
       return;
-  struct thread *next = list_entry(list_begin(&ready_list), struct thread, elem);
-
   thread_current()->priority = new_priority;
-  
-  if (next->priority > new_priority)
-    thread_yield();
+  needToYield();
 }
 
 /* Returns the current thread's priority. */
@@ -385,33 +383,48 @@ thread_get_priority (void)
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice) 
 {
-  /* Not yet implemented. */
+    if (!thread_mlfqs)
+        return;
+    thread_current()->nice = nice;
+    recalculatePriority(thread_current());
+
+    if (!list_empty(&ready_list))
+        needToYield();
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+    int result = load_avg * 100;
+    int f = 1 << 14;
+
+    if (result >= 0)
+        return (result + f / 2) / f;
+    else
+        return (result - f / 2) / f;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+    int recent_cpu = thread_current()->recent_cpu * 100;
+    int f = 1 << 14;
+
+    if (recent_cpu >= 0)
+        return (recent_cpu + f / 2) / f;
+    else
+        return (recent_cpu - f / 2) / f;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -499,6 +512,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  if (thread_mlfqs) {
+      t->nice = 0;
+      t->recent_cpu = 0;
+  }
   list_push_back (&all_list, &t->allelem);
 }
 
@@ -618,7 +635,7 @@ allocate_tid (void)
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 //------------------------------------ Eunwoo Implement Part ------------------------
-bool comparePriority(const struct list_elem *a, const struct list_elem* b, void *aux) {
+bool comparePriority(const struct list_elem *a, const struct list_elem* b, void *aux UNUSED) {
     struct thread* first, *second;
 
     first = list_entry(a, struct thread, elem);
@@ -643,4 +660,87 @@ void thread_aging(void) {
     }
 
     list_sort(&ready_list, comparePriority, NULL);
+}
+
+void recalculateLoadavg(void) {
+    int num = 0;
+    int f = 1 << 14;
+    int64_t temp;
+    struct list_elem *e;
+    struct thread *tempthread;
+
+    if (thread_current() != idle_thread)
+        num++;
+    
+    for (e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)) {
+        tempthread = list_entry(e, struct thread, elem);
+        if (tempthread != idle_thread)
+            ++num;
+    }
+    temp = (int64_t)59 * f / 60;
+    temp = temp * load_avg / f;
+    temp += f / 60 * num;
+    load_avg = (int)temp;
+}
+
+void recalculateRecentcpu(void) {
+    struct list_elem *e;
+    struct thread* temp;
+    int f = 1 << 14;
+    int64_t tempnum;
+
+    temp = thread_current();
+    if (temp != idle_thread) {
+      tempnum = ((int64_t)(2 * load_avg)) * f / (2 * load_avg + f);
+      temp->recent_cpu = (int)(tempnum * temp->recent_cpu / f + (int64_t)(temp->nice * f));
+    }
+
+    for (e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)) {
+        temp = list_entry(e, struct thread, elem);
+        if (temp == idle_thread)
+            continue;
+
+        tempnum = ((int64_t)(2 * load_avg)) * f / (2 * load_avg + f);
+        temp->recent_cpu = (int)(tempnum * temp->recent_cpu / f + (int64_t)(temp->nice * f));
+    }
+}
+void recalculateAllPriority(void) {
+    struct list_elem *e;
+    struct thread* temp;
+    if (thread_current() != idle_thread)
+        recalculatePriority(thread_current());
+    for (e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)) {
+        temp = list_entry(e, struct thread, elem);
+        if (temp == idle_thread)
+            continue;
+        recalculatePriority(temp);
+    }
+    needToYield();
+}
+
+void recalculatePriority(struct thread* t) {
+    int f = 1 << 14;
+    int result = (PRI_MAX * f - t->recent_cpu / 4 - t->nice * 2 * f) / f;
+
+    if (t == idle_thread)
+        return;
+    if (result < 0)
+        t->priority = 0;
+    else if (result > 63)
+        t->priority = 63;
+    else
+        t->priority = result;
+}
+
+void needToYield(void) {
+    struct thread* me = thread_current();
+    struct thread* next = list_entry(list_begin(&ready_list), struct thread, elem);
+
+    if (!list_empty(&ready_list))
+        if (me->priority < next->priority) {
+            if (intr_context())
+                intr_yield_on_return ();
+            else
+                thread_yield();
+        }
 }

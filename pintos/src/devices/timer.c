@@ -115,23 +115,17 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  if (ticks <= 0)
+  if (ticks <= 0) {
       return;
+  }
   struct SleepThread *sleep_thread = (struct SleepThread*)malloc(sizeof(struct SleepThread));
   sema_init(&sleep_thread->sema, 0);
   sleep_thread->tick_end = timer_ticks() + ticks;
 
   ASSERT (intr_get_level () == INTR_ON);
+
   list_insert_ordered(&sleep_list, &sleep_thread->elem, less_func, 0);
-
   sema_down(&sleep_thread->sema);
-  return;
-
-	/* original implementation 
-  int64_t start = timer_ticks ();
-	while (timer_elapsed (start) < ticks) 
-    thread_yield ();
-	*/
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -208,21 +202,24 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
-	struct list_elem *e;
   ticks++;
 
-  if(list_empty(&sleep_list)){
-	  thread_tick ();
-	  return;
+  if (!list_empty(&sleep_list))
+    if(list_entry(list_begin(&sleep_list), struct SleepThread, elem)->tick_end == ticks)
+	    popSleepFront(ticks);
+  if (thread_mlfqs) {
+    if (timer_ticks() % TIMER_FREQ == 0) {
+       recalculateLoadavg();
+       recalculateRecentcpu();
+       recalculateAllPriority();
+    }
+    else if (ticks % 4 == 0) {
+        recalculatePriority(thread_current());
+        needToYield();
+    }
   }
-  if(list_entry(list_begin(&sleep_list), struct SleepThread, elem)->tick_end == ticks){
-	  popSleepFront(ticks);
-	  thread_tick ();
-  }
-  else{
-	  thread_tick();
-  }
-  return;
+
+  thread_tick();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -304,8 +301,8 @@ static void popSleepFront(int32_t current){
 	enum intr_level old_level;
 
 	while((t = list_entry(list_begin(&sleep_list), struct SleepThread, elem))->tick_end == current){
+
 		current_sema = &(t->sema);
-		
 		old_level = intr_disable();
 		list_entry(list_pop_front(&sleep_list), struct SleepThread, elem);
 		intr_set_level(old_level);
@@ -319,7 +316,7 @@ static bool less_func(const struct list_elem* a,const struct list_elem* b, void 
 	struct SleepThread* itemp1 = list_entry(a, struct SleepThread, elem);
 	struct SleepThread* itemp2 = list_entry(b, struct SleepThread, elem);
 
-	if(itemp1->tick_end < itemp2 -> tick_end){
+	if(itemp1->tick_end < itemp2->tick_end){
 		return true;
 	}
 	else{

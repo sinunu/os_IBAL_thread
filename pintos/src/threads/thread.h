@@ -106,6 +106,8 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+    int nice;
+    int recent_cpu;
 #ifndef USERPROG
     long long ready_start;
 #endif
@@ -147,4 +149,9 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 bool comparePriority(const struct list_elem *a, const struct list_elem *b, void *aux);
+void recalculateLoadavg(void);
+void recalculateRecentcpu(void);
+void recalculateAllPriority(void);
+void recalculatePriority(struct thread* t);
+void needToYield(void);
 #endif /* threads/thread.h */
