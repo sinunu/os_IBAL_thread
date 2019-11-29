@@ -74,6 +74,10 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+#ifndef USERPROG
+// project #3
+void thread_aging(void);
+#endif
 
 
 /* Initializes the threading system by transforming the code
@@ -146,8 +150,8 @@ thread_tick (void)
 #ifndef USERPROG
 // project #3
     //thread_wake_up();
-    if (thread_prior_aging == true)
-       1;//  thread_aging();
+    if (thread_prior_aging == true && kernel_ticks % 100 == 0)
+      thread_aging();
 #endif
 }
 
@@ -257,7 +261,8 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
   list_insert_ordered (&ready_list, &t->elem, comparePriority, NULL);
- // list_push_back (&ready_list, &t->elem);
+  if (thread_prior_aging)
+      t->ready_start = kernel_ticks;
   t->status = THREAD_READY;
   intr_set_level (old_level);
   if (thread_current() != idle_thread)
@@ -330,9 +335,11 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
+  if (cur != idle_thread) {
     list_insert_ordered (&ready_list, &cur->elem, comparePriority, NULL);
-    //list_push_back (&ready_list, &cur->elem);
+    if (thread_prior_aging)
+        cur->ready_start = kernel_ticks;
+  }
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -359,6 +366,8 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  if (thread_mlfqs)
+      return;
   struct thread *next = list_entry(list_begin(&ready_list), struct thread, elem);
 
   thread_current()->priority = new_priority;
@@ -619,4 +628,19 @@ bool comparePriority(const struct list_elem *a, const struct list_elem* b, void 
         return true;
     else
         return false;
+}
+
+void thread_aging(void) {
+    struct list_elem *e;
+    struct thread* temp;
+
+    for (e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)) {
+        temp = list_entry(e, struct thread, elem);
+        if (temp != idle_thread) {
+            temp->priority += (int)((kernel_ticks - temp->ready_start) / 100);
+            temp->ready_start %= 100;
+        }
+    }
+
+    list_sort(&ready_list, comparePriority, NULL);
 }

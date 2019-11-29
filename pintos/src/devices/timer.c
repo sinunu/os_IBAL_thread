@@ -115,6 +115,8 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
+  if (ticks <= 0)
+      return;
   struct SleepThread *sleep_thread = (struct SleepThread*)malloc(sizeof(struct SleepThread));
   sema_init(&sleep_thread->sema, 0);
   sleep_thread->tick_end = timer_ticks() + ticks;

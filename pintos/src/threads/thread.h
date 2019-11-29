@@ -106,6 +106,9 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+#ifndef USERPROG
+    long long ready_start;
+#endif
   };
 
 /* If false (default), use round-robin scheduler.
