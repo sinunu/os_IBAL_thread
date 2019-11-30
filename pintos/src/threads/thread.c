@@ -135,8 +135,8 @@ thread_tick (void)
   struct thread *t = thread_current ();
 
   /* Update statistics. */
-  if (thread_mlfqs)
-      t->recent_cpu += (1 << 14);
+  if (thread_mlfqs && t != idle_thread)
+    t->recent_cpu += (1 << 14);
   if (t == idle_thread)
     idle_ticks++;
 #ifdef USERPROG
@@ -385,13 +385,13 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice) 
 {
+    struct thread* me = thread_current();
     if (!thread_mlfqs)
         return;
-    thread_current()->nice = nice;
-    recalculatePriority(thread_current());
+    me->nice = nice;
+    recalculatePriority(me);
 
-    if (!list_empty(&ready_list))
-        needToYield();
+    needToYield();
 }
 
 /* Returns the current thread's nice value. */
@@ -679,7 +679,7 @@ void recalculateLoadavg(void) {
     }
     temp = (int64_t)59 * f / 60;
     temp = temp * load_avg / f;
-    temp += f / 60 * num;
+    temp += (f / 60) * num;
     load_avg = (int)temp;
 }
 
@@ -715,12 +715,19 @@ void recalculateAllPriority(void) {
             continue;
         recalculatePriority(temp);
     }
+    list_sort(&ready_list, comparePriority, NULL);
     needToYield();
 }
 
 void recalculatePriority(struct thread* t) {
     int f = 1 << 14;
-    int result = (PRI_MAX * f - t->recent_cpu / 4 - t->nice * 2 * f) / f;
+    int result = (PRI_MAX * f - t->recent_cpu / 4 - t->nice * 2 * f);
+    //int result = (PRI_MAX * f - t->recent_cpu / 4 - t->nice * f * 9 / 5);
+
+    if (result >= 0)
+        result = (result + f / 2) / f;
+    else
+        result = (result - f / 2) / f;
 
     if (t == idle_thread)
         return;
@@ -743,4 +750,8 @@ void needToYield(void) {
             else
                 thread_yield();
         }
+}
+
+int getRealLoadavg(void) {
+    return load_avg;
 }

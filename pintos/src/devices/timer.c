@@ -203,23 +203,23 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-
   if (!list_empty(&sleep_list))
     if(list_entry(list_begin(&sleep_list), struct SleepThread, elem)->tick_end == ticks)
 	    popSleepFront(ticks);
-  if (thread_mlfqs) {
-    if (timer_ticks() % TIMER_FREQ == 0) {
-       recalculateLoadavg();
-       recalculateRecentcpu();
-       recalculateAllPriority();
-    }
-    else if (ticks % 4 == 0) {
-        recalculatePriority(thread_current());
-        needToYield();
-    }
-  }
 
   thread_tick();
+  if (thread_mlfqs) {
+    if (timer_ticks() % TIMER_FREQ == 0) {
+       recalculateRecentcpu();
+       recalculateLoadavg();
+       recalculateAllPriority();
+    }
+    else if (timer_ticks() % 4 == 0) {
+        //recalculatePriority(thread_current());
+        recalculateAllPriority();
+        //needToYield();
+    }
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

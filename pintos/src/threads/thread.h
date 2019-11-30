@@ -154,4 +154,5 @@ void recalculateRecentcpu(void);
 void recalculateAllPriority(void);
 void recalculatePriority(struct thread* t);
 void needToYield(void);
+int getRealLoadavg(void);
 #endif /* threads/thread.h */
