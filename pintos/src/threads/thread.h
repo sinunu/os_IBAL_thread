@@ -4,6 +4,12 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h" // project #3
+
+#ifndef USERPROG
+//project #3
+extern bool thread_prior_aging;
+#endif
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -100,6 +106,11 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+    int nice;
+    int recent_cpu;
+#ifndef USERPROG
+    long long ready_start;
+#endif
   };
 
 /* If false (default), use round-robin scheduler.
@@ -137,5 +148,11 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-
+bool comparePriority(const struct list_elem *a, const struct list_elem *b, void *aux);
+void recalculateLoadavg(void);
+void recalculateRecentcpu(void);
+void recalculateAllPriority(void);
+void recalculatePriority(struct thread* t);
+void needToYield(void);
+int getRealLoadavg(void);
 #endif /* threads/thread.h */
